@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  # postgresql database
+  db:
+    image: postgres:16-alpine
+    container_name: pulsechat_db
+    environment:
+      POSTGRES_USER: pulsechat
+      POSTGRES_PASSWORD: pulsechat123
+      POSTGRES_DB: pulsechat
+    ports:
+      - "5432:5432" # my laptop:container port
+    volumes:
+      - postgres_data:/var/lib/postgresql/data # persist data across restarts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulsechat"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: pulsechat_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+
+# Why alpine images? Alpine Linux is a minimal OS — postgres:16-alpine is ~80MB vs postgres:16 at ~400MB.
+# Smaller = faster to download and start.
+
+# Why volumes? Without a volume, all your data disappears every time the container restarts.
+# Volumes persist data on your laptop's filesystem and mount it into the container.
