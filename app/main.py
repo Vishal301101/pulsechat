@@ -4,6 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.db.session import engine,Base
+from app.models import *  # noqa — ensures models are registered with Base
+from app.api.v1 import api_router
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +48,8 @@ app.add_middleware(
     allow_headers = ["*"]
 )
 
+app.include_router(api_router)
+
 @app.get("/health")
 async def health_check():
     return {
@@ -56,3 +62,4 @@ async def health_check():
 @app.get("/")
 async def root():
     return {"message": f"Welcome to {settings.APP_NAME}"}
+
