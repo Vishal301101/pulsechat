@@ -1,25 +1,31 @@
+# app/schemas/workspace.py
 from __future__ import annotations
 import uuid
 import re
 from datetime import datetime
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, Field, field_validator
+from pydantic import ConfigDict
+
 
 class WorkspaceCreate(BaseModel):
-    name: str = Field(min_length=3,max_length=100)
-    description: str | None = Field(default=None,max_length=500)
+    name: str = Field(min_length=2, max_length=100)
+    description: str | None = Field(default=None, max_length=500)
     slug: str | None = Field(default=None, min_length=2, max_length=50)
-    
-    @field_validator("slug",mode="before")
+
+    @field_validator("slug", mode="before")
     @classmethod
-    def validate_slug(cls,v: str | None,info) -> str:
+    def validate_slug(cls, v: str | None) -> str | None:
         if v is not None:
             if not re.match(r'^[a-z0-9-]+$', v):
                 raise ValueError(
                     "Slug can only contain lowercase letters, numbers, hyphens"
                 )
         return v
-    
+
+
 class WorkspaceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     name: str
     slug: str
@@ -27,19 +33,19 @@ class WorkspaceResponse(BaseModel):
     owner_id: uuid.UUID
     created_at: datetime
 
-    model_config = {"from_attributes": True}
 
 class WorkspaceMemberResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     user_id: uuid.UUID
     workspace_id: uuid.UUID
     role: str
     created_at: datetime
 
-    model_config = {"from_attributes",True}
 
 class InviteMemberRequest(BaseModel):
     email: str
-    role: str = Field(default="member",pattern="^(admin|member)$")
+    role: str = Field(default="member", pattern="^(admin|member)$")
 
 # Why a slug field? URLs like /workspaces/my-workspace are readable and shareable. UUIDs like /workspaces/a3f9b2c1-... are not. The slug is the human-friendly identifier. We auto-generate it from the name if the user doesn't provide one — "My   Workspace!!" → "my-workspace".
 # Why @field_validator? Pydantic's Field(pattern=...) only works on strings that are provided. But slug is optional — it might be None. A validator lets you run custom logic: if slug is provided, validate its format; if not, leave it for the service to generate. You can't do this with Field() alone.
