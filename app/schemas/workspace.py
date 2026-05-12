@@ -45,7 +45,7 @@ class WorkspaceMemberResponse(BaseModel):
 
 class InviteMemberRequest(BaseModel):
     email: str
-    role: str = Field(default="member", pattern="^(admin|member)$")
+    role: str = Field(default="MEMBER", pattern="^(ADMIN|MEMBER)$")
 
 # Why a slug field? URLs like /workspaces/my-workspace are readable and shareable. UUIDs like /workspaces/a3f9b2c1-... are not. The slug is the human-friendly identifier. We auto-generate it from the name if the user doesn't provide one — "My   Workspace!!" → "my-workspace".
 # Why @field_validator? Pydantic's Field(pattern=...) only works on strings that are provided. But slug is optional — it might be None. A validator lets you run custom logic: if slug is provided, validate its format; if not, leave it for the service to generate. You can't do this with Field() alone.

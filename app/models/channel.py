@@ -9,8 +9,8 @@ from app.models.base import TimestampMixin
 
 
 class ChannelRole(str, enum.Enum):
-    ADMIN = "admin"
-    MEMBER = "member"
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
 
 
 class Channel(Base, TimestampMixin):

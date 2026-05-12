@@ -93,9 +93,9 @@ class WorkspaceService:
         Returns all workspaces the user belongs to.
         Joins workspace_members → workspaces to find them.
         """
-        result = session.execute(
+        result = await session.execute(
             select(Workspace)
-            .join(WorkspaceMember, WorkspaceMember.workspace_id == user.id)
+            .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
             .where(WorkspaceMember.user_id == user.id)
             .order_by(Workspace.created_at.desc())
         )

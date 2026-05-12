@@ -9,9 +9,9 @@ from app.models.base import TimestampMixin
 
 
 class WorkspaceRole(str, enum.Enum):
-    OWNER = "owner"
-    ADMIN = "admin"
-    MEMBER = "member"
+    OWNER = "OWNER"
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
 
 
 class Workspace(Base, TimestampMixin):
