@@ -46,7 +46,7 @@ class MessageService:
         
         # 2. Validate parent message if this is a reply
         if data.parent_id:
-            parent = await session,get(Message,data.parent_id)
+            parent = await session.get(Message,data.parent_id)
             if not parent:
                 raise ValueError("Parent message not found")
             if parent.channel_id != channel_id:
@@ -59,7 +59,7 @@ class MessageService:
 
         # 4. Create and save the message
         message = Message(
-            id = uuid.UUID,
+            id = uuid.uuid4(),
             channel_id = channel_id,
             sender_id = sender.id,
             content = data.content,
@@ -69,11 +69,17 @@ class MessageService:
         session.add(message)
         await session.flush()
 
-        # 5. Reload with relationships for the response
-        await session.refresh(message)
+        # Reload message with all relationships explicitly loaded
+        # Can't use session.refresh() for relationships in async — use a fresh select
+        result = await session.execute(
+            select(Message)
+            .where(Message.id == message.id)
+            .options(selectinload(Message.reactions))
+        )
+        message = result.scalar_one()
         return message
     
-    async def get_message(
+    async def get_messages(
             self,
             session: AsyncSession,
             channel_id: uuid.UUID,
@@ -97,6 +103,7 @@ class MessageService:
             .where(Message.channel_id == channel_id)
             .options(selectinload(Message.reactions))
             .order_by(Message.seq_num.desc())
+            .limit(limit+1)
         )
 
         if before_seq is not None:
@@ -112,9 +119,187 @@ class MessageService:
         # Return in chronological order (oldest first)
         messages.reverse()
         return messages, has_more
+    
+    async def edit_message(
+            self,
+            session: AsyncSession,
+            message_id: uuid.UUID,
+            user: User,
+            data: EditMessageRequest
+    ) -> Message:
+        """
+        Edits a message. Only the original sender can edit.
+        Cannot edit deleted messages.
+        """
+        message = await session.get(Message,message_id)
+        if not message:
+            raise ValueError("Message not found")
+        if message.sender_id != user.id:
+            raise PermissionError("You can only edit your own message")
+        if message.is_deleted:
+            raise ValueError("Cannot edit a deleted message")
         
+        message.content = data.content
+        message.is_edited = True
+        await session.flush()
+        return message
+    
+    async def delete_message(
+            self,
+            session: AsyncSession,
+            message_id: uuid.UUID,
+            user: User
+    ) -> Message:
+        """
+        Soft deletes a message.
+        Sender can delete their own. Channel admin can delete any.
+        Content is cleared, is_deleted flag set.
+        """
+
+        message = await session.get(Message,message_id)
+        if not message:
+            raise ValueError("Message not found")
+
+        # Check permission — sender or channel admin
+        is_sender = message.sender_id == user.id
+        is_admin = await self._is_channel_admin(
+            session, message.channel_id, user.id
+        )         
+        if not is_sender and not is_admin:
+            raise PermissionError(
+                "You can only delete your own messages"
+            )
+        if message.is_deleted:
+            raise ValueError("Message is already deleted")
+        message.content = "This message was deleted"
+        message.is_deleted = True
+        await session.flush()
+
+        return message
+    
+    async def add_reaction(
+        self,
+        session: AsyncSession,
+        message_id: uuid.UUID,
+        user: User,
+        data: AddReactionRequest,
+    ) -> Reaction:
+        """Adds an emoji reaction to a message."""
+        message = await session.get(Message, message_id)
+        if not message:
+            raise ValueError("Message not found")
+
+        if message.is_deleted:
+            raise ValueError("Cannot react to a deleted message")
+
+        # Check not already reacted with same emoji
+        existing = await session.execute(
+            select(Reaction).where(
+                Reaction.message_id == message_id,
+                Reaction.user_id == user.id,
+                Reaction.emoji == data.emoji,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise ValueError("You already reacted with this emoji")
+
+        reaction = Reaction(
+            id=uuid.uuid4(),
+            message_id=message_id,
+            user_id=user.id,
+            emoji=data.emoji,
+        )
+        session.add(reaction)
+        await session.flush()
+
+        return reaction
+
+    async def remove_reaction(
+        self,
+        session: AsyncSession,
+        message_id: uuid.UUID,
+        user: User,
+        emoji: str,
+    ) -> None:
+        """Removes an emoji reaction from a message."""
+        result = await session.execute(
+            select(Reaction).where(
+                Reaction.message_id == message_id,
+                Reaction.user_id == user.id,
+                Reaction.emoji == emoji,
+            )
+        )
+        reaction = result.scalar_one_or_none()
+        if not reaction:
+            raise ValueError("Reaction not found")
+
+        await session.delete(reaction)
+        await session.flush()
+
+    async def search_messages(
+            self,
+            session: AsyncSession,
+            channel_id: uuid.UUID,
+            user: User,
+            query: str,
+            limit: int = 20
+    ) -> Message:
+        """
+        Full-text search within a channel.
+        Uses PostgreSQL ILIKE for simple case-insensitive search.
+        (We'll upgrade to tsvector in a later optimization pass)
+        """
+        member = await self._get_membership(session, channel_id, user.id)
+        if not member:
+            raise PermissionError("You are not a member of this channel")
+        
+        result = await session.execute(
+            select(Message)
+            .where(
+                Message.channel_id == channel_id,
+                Message.is_deleted == False,
+                Message.content.ilike(f"%{query}%"),
+            )
+            .options(selectinload(Message.reactions))
+            .order_by(Message.seq_num.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+    
+    async def _get_membership(
+        self,
+        session: AsyncSession,
+        channel_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> ChannelMember | None:
+        result = await session.execute(
+            select(ChannelMember).where(
+                ChannelMember.channel_id == channel_id,
+                ChannelMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _is_channel_admin(
+        self,
+        session: AsyncSession,
+        channel_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> bool:
+        result = await session.execute(
+            select(ChannelMember).where(
+                ChannelMember.channel_id == channel_id,
+                ChannelMember.user_id == user_id,
+                ChannelMember.role == "ADMIN",
+            )
+        )
+        return result.scalar_one_or_none() is not None
+    
+message_service = MessageService()
+
 
         
+    
 
 
     

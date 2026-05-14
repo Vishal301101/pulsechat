@@ -42,9 +42,8 @@ class MessageResponse(BaseModel):
     is_edited: bool
     is_deleted: bool
     created_at: datetime
-    updated_at: datetime
+    updated_at: datetime | None = None    # ← make optional
     reactions: list[ReactionResponse] = []
-
 class PaginatedMessagesResponse(BaseModel):
     messages: list[MessageResponse]
     has_more: bool          
